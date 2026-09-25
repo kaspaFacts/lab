@@ -81,12 +81,6 @@
             <span class="value" id="res-tail">--</span>
           </div>
         </div>
-
-        <div id="bounds-container" class="bounds-box">
-          <h3>Block Time Bounds for $K$ = <span id="bounds-k-target">--</span></h3>
-          <p><strong>Min Block Time:</strong> <span id="res-min-ms">--</span></p>
-          <p><strong>Max Block Time:</strong> <span id="res-max-ms">--</span></p>
-        </div>
       </section>
 
       <!-- PROBABILITY DISTRIBUTION CHART -->
@@ -113,6 +107,35 @@
               <!-- Rendered via JS -->
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- DEDICATED BLOCK TIME BOUNDS SECTION -->
+      <section class="card full-width">
+        <h2>Block Time Bounds Analysis for Target $K$</h2>
+        <p class="subtitle" style="text-align: left; margin-bottom: 1rem;">
+          Calculates the inclusive range of block creation times (in milliseconds) that result in a specific GHOSTDAG $K$ parameter value, assuming fixed Kaspa mainnet baseline parameters ($D = 5.0\text{s}$, $\delta = 0.01$).
+        </p>
+
+        <div class="input-group" style="max-width: 300px;">
+          <label for="target-k-input">Select Target $K$ Parameter (1 – 18):</label>
+          <div class="stepper">
+            <button type="button" class="btn-step" onclick="adjustTargetK(-1)">▼</button>
+            <input type="number" id="target-k-input" min="1" max="18" value="10" oninput="updateBoundsSection()" />
+            <button type="button" class="btn-step" onclick="adjustTargetK(1)">▲</button>
+          </div>
+        </div>
+
+        <div class="metrics" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 1rem;">
+          <div class="metric-box">
+            <span class="label">Minimum Block Time</span>
+            <span class="value" id="res-min-ms" style="font-size: 1.1rem;">--</span>
+          </div>
+
+          <div class="metric-box">
+            <span class="label">Maximum Block Time</span>
+            <span class="value" id="res-max-ms" style="font-size: 1.1rem;">--</span>
+          </div>
         </div>
       </section>
     </main>
@@ -200,7 +223,7 @@
       if (minutes === 0) return ms > 0 ? `${secs}s ${ms}ms` : `${secs}s`;
 
       const parts = [`${minutes}m`, `${secs}s`];
-      if (ms > 0) parts.push(`${ms}ms`);
+      if (ms > 0) parts.append(`${ms}ms`);
       return parts.join(' ');
     }
 
@@ -217,6 +240,26 @@
       val = Math.max(0.0001, val + delta);
       input.value = field === 'bps' ? Math.round(val) : val.toFixed(1);
       onParamChange();
+    }
+
+    function adjustTargetK(delta) {
+      const input = document.getElementById('target-k-input');
+      let val = parseInt(input.value) || 10;
+      val = Math.max(1, Math.min(18, val + delta));
+      input.value = val;
+      updateBoundsSection();
+    }
+
+    function updateBoundsSection() {
+      const targetK = parseInt(document.getElementById('target-k-input').value);
+      if (targetK >= 1 && targetK <= 18) {
+        const bounds = blockTimeMsBoundsForK(targetK);
+        document.getElementById('res-min-ms').innerText = `${formatDuration(bounds.minMs)} (${bounds.minMs}ms | ~${(1000/bounds.minMs).toFixed(2)} BPS)`;
+        document.getElementById('res-max-ms').innerText = `${formatDuration(bounds.maxMs)} (${bounds.maxMs}ms | ~${(1000/bounds.maxMs).toFixed(2)} BPS)`;
+      } else {
+        document.getElementById('res-min-ms').innerText = 'Out of range (1-18)';
+        document.getElementById('res-max-ms').innerText = 'Out of range (1-18)';
+      }
     }
 
     function onParamChange() {
@@ -305,17 +348,11 @@
       document.getElementById('res-x').innerText = x.toFixed(4);
       document.getElementById('res-tail').innerText = (actualTail * 100).toFixed(4) + '%';
 
-      // Display Bounds (if K is within 1..18 range)
-      const boundsContainer = document.getElementById('bounds-container');
+      // Automatically sync target K input for the bounds section if within range
       if (k >= 1 && k <= 18) {
-        const bounds = blockTimeMsBoundsForK(k);
-        document.getElementById('bounds-k-target').innerText = k;
-        document.getElementById('res-min-ms').innerText = `${formatDuration(bounds.minMs)} (${bounds.minMs}ms | ~${(1000/bounds.minMs).toFixed(2)} BPS)`;
-        document.getElementById('res-max-ms').innerText = `${formatDuration(bounds.maxMs)} (${bounds.maxMs}ms | ~${(1000/bounds.maxMs).toFixed(2)} BPS)`;
-        boundsContainer.style.display = 'block';
-      } else {
-        boundsContainer.style.display = 'none';
+        document.getElementById('target-k-input').value = k;
       }
+      updateBoundsSection();
 
       // Display Probability Distribution Table & Chart Data
       const tbody = document.getElementById('dist-tbody');
