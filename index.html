@@ -23,7 +23,7 @@
         
         <div class="input-group">
           <label for="bps-input">
-            Target Block Rate ($\lambda$ in BPS)
+            Target Block Rate (λ in BPS)
           </label>
           <div class="stepper">
             <button type="button" class="btn-step" onclick="adjustValue('bps', -1)">▼</button>
@@ -35,7 +35,7 @@
 
         <div class="input-group">
           <label for="delay-input">
-            Max Network Delay ($D$ in seconds)
+            Max Network Delay (D in seconds)
           </label>
           <div class="stepper">
             <button type="button" class="btn-step" onclick="adjustValue('delay', -0.5)">▼</button>
@@ -46,7 +46,7 @@
 
         <div class="input-group">
           <label for="tail-input">
-            Target Tail Delta ($\delta$) %
+            Target Tail Delta (δ) %
           </label>
           <div class="stepper">
             <button type="button" class="btn-step" onclick="adjustValue('tail', -1)">▼</button>
@@ -67,12 +67,12 @@
         
         <div class="metrics">
           <div class="metric-box highlight">
-            <span class="label">Minimal GHOSTDAG $K$</span>
+            <span class="label">Minimal GHOSTDAG K</span>
             <span class="value" id="res-k">--</span>
           </div>
 
           <div class="metric-box">
-            <span class="label">Expected Anticone ($x = 2D\lambda$)</span>
+            <span class="label">Expected Anticone (x = 2Dλ)</span>
             <span class="value" id="res-x">--</span>
           </div>
 
@@ -85,7 +85,7 @@
 
       <!-- PROBABILITY DISTRIBUTION CHART -->
       <section class="card full-width">
-        <h2>Anticone Size Distribution Chart $P(n)$</h2>
+        <h2>Anticone Size Distribution Chart P(n)</h2>
         <div style="position: relative; height: 300px; width: 100%;">
           <canvas id="distChart"></canvas>
         </div>
@@ -93,14 +93,14 @@
 
       <!-- DISTRIBUTION TABLE -->
       <section class="card full-width">
-        <h2>DAG Concurrency Probability Distribution $P(n)$</h2>
+        <h2>DAG Concurrency Probability Distribution P(n)</h2>
         <div class="table-wrapper">
           <table>
             <thead>
               <tr>
-                <th>Anticone Size ($n$)</th>
-                <th>$P(\text{Anticone} = n)$</th>
-                <th>Cumulative $P(\le n)$</th>
+                <th>Anticone Size (n)</th>
+                <th>P(Anticone = n)</th>
+                <th>Cumulative P(≤ n)</th>
               </tr>
             </thead>
             <tbody id="dist-tbody">
@@ -112,14 +112,14 @@
 
       <!-- DEDICATED BLOCK TIME BOUNDS SECTION -->
       <section class="card full-width">
-        <h2>Block Time Bounds Analysis for Target $K$</h2>
+        <h2>Block Time Bounds Analysis for Target K</h2>
         <p class="subtitle" style="text-align: left; margin-bottom: 1.5rem;">
-          Calculates the inclusive range of block creation times (in milliseconds) that resolve to a target GHOSTDAG $K$ parameter (constrained to $1 \le K \le 18$).
+          Calculates the inclusive range of block creation times (in milliseconds) that resolve to a target GHOSTDAG K parameter (constrained to 1 ≤ K ≤ 18).
         </p>
 
         <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
           <div class="input-group" style="flex: 1; min-width: 200px;">
-            <label for="target-k-input">Target $K$ Parameter (1 – 18):</label>
+            <label for="target-k-input">Target K Parameter (1 – 18):</label>
             <div class="stepper">
               <button type="button" class="btn-step" onclick="adjustTargetK(-1)">▼</button>
               <input type="number" id="target-k-input" min="1" max="18" value="10" oninput="updateBoundsSection()" />
@@ -128,7 +128,7 @@
           </div>
 
           <div class="input-group" style="flex: 1; min-width: 200px;">
-            <label for="bounds-delay-input">Max Network Delay ($D$ in sec):</label>
+            <label for="bounds-delay-input">Max Network Delay (D in sec):</label>
             <div class="stepper">
               <button type="button" class="btn-step" onclick="adjustBoundsDelay(-0.5)">▼</button>
               <input type="number" id="bounds-delay-input" step="0.1" min="0.1" value="5.0" oninput="updateBoundsSection()" />
@@ -137,7 +137,7 @@
           </div>
 
           <div class="input-group" style="flex: 1; min-width: 200px;">
-            <label for="bounds-tail-input">Target Tail Delta ($\delta$) %:</label>
+            <label for="bounds-tail-input">Target Tail Delta (δ) %:</label>
             <div class="stepper">
               <button type="button" class="btn-step" onclick="adjustBoundsTail(-0.1)">▼</button>
               <input type="number" id="bounds-tail-input" step="0.1" min="0.0001" max="99.9" value="1.0" oninput="updateBoundsSection()" />
@@ -177,8 +177,8 @@
       const probabilitiesList = [];
       let n = 0;
 
-      // Safety limit of 1000 iterations to prevent browser freeze
-      while (n < 1000) {
+      // Hard limit at n = 30 to prevent float overflow and UI degradation
+      while (n <= 30) {
         const term = expNegX * poissonTerm;
         cumulativeProbability += term;
         probabilitiesList.push(term);
@@ -402,8 +402,13 @@
       const k = dist.length - 1;
       const actualTail = 1.0 - dist.reduce((a, b) => a + b, 0);
 
-      // Display Main Results
-      document.getElementById('res-k').innerText = k;
+      // Display Main Results (Clamped to 30 Max)
+      if (k >= 30) {
+        document.getElementById('res-k').innerText = "30+ (Max Limit)";
+      } else {
+        document.getElementById('res-k').innerText = k;
+      }
+
       document.getElementById('res-x').innerText = x.toFixed(4);
       document.getElementById('res-tail').innerText = (actualTail * 100).toFixed(4) + '%';
 
