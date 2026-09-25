@@ -27,7 +27,7 @@
           </label>
           <div class="stepper">
             <button type="button" class="btn-step" onclick="adjustValue('bps', -1)">▼</button>
-            <input type="number" id="bps-input" step="1" min="0.001" value="10" oninput="onParamChange()" />
+            <input type="number" id="bps-input" step="1" min="0.0001" value="10" oninput="onParamChange()" />
             <button type="button" class="btn-step" onclick="adjustValue('bps', 1)">▲</button>
           </div>
           <small id="block-time-hint">Block time: 100ms</small>
@@ -113,20 +113,40 @@
       <!-- DEDICATED BLOCK TIME BOUNDS SECTION -->
       <section class="card full-width">
         <h2>Block Time Bounds Analysis for Target $K$</h2>
-        <p class="subtitle" style="text-align: left; margin-bottom: 1rem;">
-          Calculates the inclusive range of block creation times (in milliseconds) that result in a specific GHOSTDAG $K$ parameter value, assuming fixed Kaspa mainnet baseline parameters ($D = 5.0\text{s}$, $\delta = 0.01$).
+        <p class="subtitle" style="text-align: left; margin-bottom: 1.5rem;">
+          Calculates the inclusive range of block creation times (in milliseconds) that resolve to a target GHOSTDAG $K$ parameter. Adjust target parameters below to customize the calculation.
         </p>
 
-        <div class="input-group" style="max-width: 300px;">
-          <label for="target-k-input">Select Target $K$ Parameter (1 – 18):</label>
-          <div class="stepper">
-            <button type="button" class="btn-step" onclick="adjustTargetK(-1)">▼</button>
-            <input type="number" id="target-k-input" min="1" max="18" value="10" oninput="updateBoundsSection()" />
-            <button type="button" class="btn-step" onclick="adjustTargetK(1)">▲</button>
+        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
+          <div class="input-group" style="flex: 1; min-width: 200px;">
+            <label for="target-k-input">Target $K$ Parameter (1 – 100):</label>
+            <div class="stepper">
+              <button type="button" class="btn-step" onclick="adjustTargetK(-1)">▼</button>
+              <input type="number" id="target-k-input" min="1" max="100" value="10" oninput="updateBoundsSection()" />
+              <button type="button" class="btn-step" onclick="adjustTargetK(1)">▲</button>
+            </div>
+          </div>
+
+          <div class="input-group" style="flex: 1; min-width: 200px;">
+            <label for="bounds-delay-input">Max Network Delay ($D$ in sec):</label>
+            <div class="stepper">
+              <button type="button" class="btn-step" onclick="adjustBoundsDelay(-0.5)">▼</button>
+              <input type="number" id="bounds-delay-input" step="0.1" min="0.1" value="5.0" oninput="updateBoundsSection()" />
+              <button type="button" class="btn-step" onclick="adjustBoundsDelay(0.5)">▲</button>
+            </div>
+          </div>
+
+          <div class="input-group" style="flex: 1; min-width: 200px;">
+            <label for="bounds-tail-input">Target Tail Delta ($\delta$) %:</label>
+            <div class="stepper">
+              <button type="button" class="btn-step" onclick="adjustBoundsTail(-0.1)">▼</button>
+              <input type="number" id="bounds-tail-input" step="0.1" min="0.0001" max="99.9" value="1.0" oninput="updateBoundsSection()" />
+              <button type="button" class="btn-step" onclick="adjustBoundsTail(0.1)">▲</button>
+            </div>
           </div>
         </div>
 
-        <div class="metrics" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 1rem;">
+        <div class="metrics" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin-top: 1rem;">
           <div class="metric-box">
             <span class="label">Minimum Block Time</span>
             <span class="value" id="res-min-ms" style="font-size: 1.1rem;">--</span>
@@ -143,7 +163,7 @@
 
   <script>
     /* ====================================================================
-       MATHEMATICAL CORE (Ported from Python)
+       MATHEMATICAL CORE
        ==================================================================== */
 
     function calculateAnticoneSizeExpectation(bps, maxDelay) {
@@ -151,11 +171,11 @@
     }
 
     function calculateGhostdagKWithDistribution(x, maxTailProbability) {
-      let minK = 0;
       let cumulativeProbability = 0.0;
       let poissonTerm = 1.0;
       const expNegX = Math.exp(-x);
       const probabilitiesList = [];
+      let n = 0;
 
       while (true) {
         const term = expNegX * poissonTerm;
@@ -166,8 +186,8 @@
           return probabilitiesList;
         }
 
-        minK += 1;
-        poissonTerm *= x / minK;
+        n += 1;
+        poissonTerm *= x / n;
       }
     }
 
@@ -176,11 +196,8 @@
       return dist.length - 1;
     }
 
-    function blockTimeMsBoundsForK(kTarget) {
-      if (kTarget < 1 || kTarget > 18) return null;
-
-      const maxNetworkDelay = 5.0;
-      const maxTailProbability = 0.01;
+    function blockTimeMsBoundsForK(kTarget, maxNetworkDelay, maxTailProbability) {
+      if (kTarget < 1) return null;
 
       function kOfMs(ms) {
         const bps = 1000.0 / ms;
@@ -188,47 +205,62 @@
         return calculateGhostdagK(x, maxTailProbability);
       }
 
-      let lo = 1, hi = 1000;
-      while (kOfMs(hi) >= kTarget) {
-        lo = hi;
-        hi *= 2;
+      // Upper bound search: search up to 100 days (~8.64e8 ms)
+      let lo = 1;
+      let hi = 8640000000;
+
+      if (kOfMs(1) > kTarget) {
+        return { minMs: 1, maxMs: 1 };
       }
 
-      while (hi - lo > 1) {
-        const mid = Math.floor((lo + hi) / 2);
-        if (kOfMs(mid) >= kTarget) lo = mid;
-        else hi = mid;
+      // Binary search for maximum MS where k <= kTarget
+      let searchLo = 1, searchHi = hi;
+      while (searchHi - searchLo > 1) {
+        const mid = Math.floor((searchLo + searchHi) / 2);
+        if (kOfMs(mid) >= kTarget) {
+          searchLo = mid;
+        } else {
+          searchHi = mid;
+        }
       }
-      const maxMs = lo;
+      const maxMs = searchLo;
 
-      lo = 1; 
-      hi = maxMs;
-      while (hi - lo > 1) {
-        const mid = Math.floor((lo + hi) / 2);
-        if (kOfMs(mid) <= kTarget) hi = mid;
-        else lo = mid;
+      // Binary search for minimum MS where k == kTarget
+      searchLo = 1;
+      searchHi = maxMs;
+      while (searchHi - searchLo > 1) {
+        const mid = Math.floor((searchLo + searchHi) / 2);
+        if (kOfMs(mid) <= kTarget) {
+          searchHi = mid;
+        } else {
+          searchLo = mid;
+        }
       }
-      const minMs = hi;
+      const minMs = searchHi;
 
       return { minMs, maxMs };
     }
 
     function formatDuration(msToConvert) {
-      const seconds = Math.floor(msToConvert / 1000);
-      const ms = msToConvert % 1000;
-      const minutes = Math.floor(seconds / 60);
-      const secs = seconds % 60;
+      if (msToConvert < 1000) return `${msToConvert}ms`;
+      
+      const totalSeconds = msToConvert / 1000.0;
+      if (totalSeconds < 60) return `${totalSeconds.toFixed(2)}s`;
 
-      if (minutes === 0 && secs === 0) return `${ms}ms`;
-      if (minutes === 0) return ms > 0 ? `${secs}s ${ms}ms` : `${secs}s`;
+      const minutes = Math.floor(totalSeconds / 60);
+      const remainingSecs = (totalSeconds % 60).toFixed(1);
+      
+      if (minutes < 60) {
+        return `${minutes}m ${remainingSecs}s`;
+      }
 
-      const parts = [`${minutes}m`, `${secs}s`];
-      if (ms > 0) parts.append(`${ms}ms`);
-      return parts.join(' ');
+      const hours = Math.floor(minutes / 60);
+      const remMinutes = minutes % 60;
+      return `${hours}h ${remMinutes}m`;
     }
 
     /* ====================================================================
-       UI, DEBOUNCE & CHART LOGIC
+       UI & DEBOUNCE LOGIC
        ==================================================================== */
 
     let debounceTimer = null;
@@ -245,20 +277,42 @@
     function adjustTargetK(delta) {
       const input = document.getElementById('target-k-input');
       let val = parseInt(input.value) || 10;
-      val = Math.max(1, Math.min(18, val + delta));
+      val = Math.max(1, Math.min(100, val + delta));
       input.value = val;
       updateBoundsSection();
     }
 
+    function adjustBoundsDelay(delta) {
+      const input = document.getElementById('bounds-delay-input');
+      let val = parseFloat(input.value) || 5.0;
+      val = Math.max(0.1, val + delta);
+      input.value = val.toFixed(1);
+      updateBoundsSection();
+    }
+
+    function adjustBoundsTail(delta) {
+      const input = document.getElementById('bounds-tail-input');
+      let val = parseFloat(input.value) || 1.0;
+      val = Math.max(0.0001, Math.min(99.9, val + delta));
+      input.value = val.toFixed(2);
+      updateBoundsSection();
+    }
+
     function updateBoundsSection() {
-      const targetK = parseInt(document.getElementById('target-k-input').value);
-      if (targetK >= 1 && targetK <= 18) {
-        const bounds = blockTimeMsBoundsForK(targetK);
-        document.getElementById('res-min-ms').innerText = `${formatDuration(bounds.minMs)} (${bounds.minMs}ms | ~${(1000/bounds.minMs).toFixed(2)} BPS)`;
-        document.getElementById('res-max-ms').innerText = `${formatDuration(bounds.maxMs)} (${bounds.maxMs}ms | ~${(1000/bounds.maxMs).toFixed(2)} BPS)`;
+      const targetK = parseInt(document.getElementById('target-k-input').value) || 1;
+      const delay = parseFloat(document.getElementById('bounds-delay-input').value) || 5.0;
+      const tailPct = parseFloat(document.getElementById('bounds-tail-input').value) || 1.0;
+      const delta = tailPct / 100.0;
+
+      const bounds = blockTimeMsBoundsForK(targetK, delay, delta);
+      if (bounds) {
+        const minBps = (1000 / bounds.maxMs).toFixed(4);
+        const maxBps = (1000 / bounds.minMs).toFixed(4);
+        document.getElementById('res-min-ms').innerText = `${formatDuration(bounds.minMs)} (${bounds.minMs.toLocaleString()}ms | ~${maxBps} BPS)`;
+        document.getElementById('res-max-ms').innerText = `${formatDuration(bounds.maxMs)} (${bounds.maxMs.toLocaleString()}ms | ~${minBps} BPS)`;
       } else {
-        document.getElementById('res-min-ms').innerText = 'Out of range (1-18)';
-        document.getElementById('res-max-ms').innerText = 'Out of range (1-18)';
+        document.getElementById('res-min-ms').innerText = 'Out of bounds';
+        document.getElementById('res-max-ms').innerText = 'Out of bounds';
       }
     }
 
@@ -276,7 +330,7 @@
       debounceTimer = setTimeout(() => {
         statusText.innerText = 'Computing...';
         setTimeout(runCalculations, 50);
-      }, 1200);
+      }, 500);
     }
 
     function renderChart(labels, data) {
@@ -337,7 +391,7 @@
       const tailPct = parseFloat(document.getElementById('tail-input').value) || 1.0;
       const delta = tailPct / 100.0;
 
-      // Calculations
+      // Main Calculations
       const x = calculateAnticoneSizeExpectation(bps, delay);
       const dist = calculateGhostdagKWithDistribution(x, delta);
       const k = dist.length - 1;
@@ -348,10 +402,11 @@
       document.getElementById('res-x').innerText = x.toFixed(4);
       document.getElementById('res-tail').innerText = (actualTail * 100).toFixed(4) + '%';
 
-      // Automatically sync target K input for the bounds section if within range
-      if (k >= 1 && k <= 18) {
-        document.getElementById('target-k-input').value = k;
-      }
+      // Keep target inputs in sync on initial load/change
+      document.getElementById('bounds-delay-input').value = delay.toFixed(1);
+      document.getElementById('bounds-tail-input').value = tailPct.toFixed(1);
+      document.getElementById('target-k-input').value = Math.max(1, k);
+
       updateBoundsSection();
 
       // Display Probability Distribution Table & Chart Data
@@ -377,17 +432,14 @@
         tbody.appendChild(row);
       });
 
-      // Render updated chart
       renderChart(chartLabels, chartData);
 
-      // Update status back to ready
       const statusInd = document.getElementById('status-indicator');
       const statusText = document.getElementById('status-text');
       statusInd.className = 'dot ready';
       statusText.innerText = 'Ready';
     }
 
-    // Initial calculation run on page load
     window.onload = runCalculations;
   </script>
 </body>
