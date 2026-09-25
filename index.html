@@ -23,11 +23,11 @@
         
         <div class="input-group">
           <label for="bps-input">
-            Target Block Rate (λ in BPS)
+            Target Block Rate (λ in BPS, Max 30)
           </label>
           <div class="stepper">
             <button type="button" class="btn-step" onclick="adjustValue('bps', -1)">▼</button>
-            <input type="number" id="bps-input" step="1" min="0.0001" value="10" oninput="onParamChange()" />
+            <input type="number" id="bps-input" step="1" min="0.0001" max="30" value="10" oninput="onParamChange()" />
             <button type="button" class="btn-step" onclick="adjustValue('bps', 1)">▲</button>
           </div>
           <small id="block-time-hint">Block time: 100ms</small>
@@ -172,14 +172,22 @@
 
     function calculateGhostdagKWithDistribution(x, maxTailProbability) {
       let cumulativeProbability = 0.0;
-      let poissonTerm = 1.0;
-      const expNegX = Math.exp(-x);
       const probabilitiesList = [];
       let n = 0;
 
-      // Hard limit at n = 30 to prevent float overflow and UI degradation
-      while (n <= 30) {
-        const term = expNegX * poissonTerm;
+      // Numerically stable Poisson term calculation using log-space
+      // Term(n) = exp(-x + n*ln(x) - ln(n!))
+      let logFactorial = 0.0;
+      const logX = Math.log(x);
+
+      while (n < 2000) {
+        if (n > 0) {
+          logFactorial += Math.log(n);
+        }
+        
+        const logPoisson = -x + (n * logX) - logFactorial;
+        const term = Math.exp(logPoisson);
+
         cumulativeProbability += term;
         probabilitiesList.push(term);
 
@@ -188,7 +196,6 @@
         }
 
         n += 1;
-        poissonTerm *= x / n;
       }
 
       return probabilitiesList;
@@ -200,7 +207,6 @@
     }
 
     function blockTimeMsBoundsForK(kTarget, maxNetworkDelay, maxTailProbability) {
-      // Strictly enforce kTarget range [1, 18]
       if (kTarget < 1 || kTarget > 18) return null;
 
       function kOfMs(ms) {
@@ -209,10 +215,8 @@
         return calculateGhostdagK(x, maxTailProbability);
       }
 
-      // Upper bound limit: 100 days (~8.64e8 ms)
       const MAX_SEARCH_MS = 8640000000;
 
-      // Binary search for maxMs (largest MS that yields K >= kTarget)
       let lo = 1, hi = MAX_SEARCH_MS;
       while (hi - lo > 1) {
         const mid = Math.floor((lo + hi) / 2);
@@ -224,7 +228,6 @@
       }
       const maxMs = lo;
 
-      // Binary search for minMs (smallest MS that yields K <= kTarget)
       lo = 1;
       hi = maxMs;
       while (hi - lo > 1) {
@@ -268,15 +271,22 @@
     function adjustValue(field, delta) {
       const input = document.getElementById(`${field}-input`);
       let val = parseFloat(input.value) || 0;
-      val = Math.max(0.0001, val + delta);
-      input.value = field === 'bps' ? Math.round(val) : val.toFixed(1);
+
+      if (field === 'bps') {
+        val = Math.max(0.0001, Math.min(30, val + delta)); // Hard clamp BPS to 30 max
+        input.value = Math.round(val);
+      } else {
+        val = Math.max(0.0001, val + delta);
+        input.value = val.toFixed(1);
+      }
+
       onParamChange();
     }
 
     function adjustTargetK(delta) {
       const input = document.getElementById('target-k-input');
       let val = parseInt(input.value) || 10;
-      val = Math.max(1, Math.min(18, val + delta)); // Bound between 1 and 18
+      val = Math.max(1, Math.min(18, val + delta));
       input.value = val;
       updateBoundsSection();
     }
@@ -300,7 +310,6 @@
     function updateBoundsSection() {
       let targetK = parseInt(document.getElementById('target-k-input').value) || 1;
       
-      // Enforce hard clamp [1, 18]
       if (targetK < 1) targetK = 1;
       if (targetK > 18) targetK = 18;
       document.getElementById('target-k-input').value = targetK;
@@ -327,9 +336,16 @@
       statusInd.className = 'dot working';
       statusText.innerText = 'Waiting...';
 
-      const bps = parseFloat(document.getElementById('bps-input').value) || 1;
-      const ms = Math.round(1000 / bps);
-      document.getElementById('block-time-hint').innerText = `Block time: ~${ms}ms (${(1/bps).toFixed(3)}s)`;
+      // Clamp BPS on manual typing
+      let bpsInput = document.getElementById('bps-input');
+      let bpsVal = parseFloat(bpsInput.value) || 1;
+      if (bpsVal > 30) {
+        bpsVal = 30;
+        bpsInput.value = 30;
+      }
+
+      const ms = Math.round(1000 / bpsVal);
+      document.getElementById('block-time-hint').innerText = `Block time: ~${ms}ms (${(1/bpsVal).toFixed(3)}s)`;
 
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
@@ -391,7 +407,9 @@
     }
 
     function runCalculations() {
-      const bps = parseFloat(document.getElementById('bps-input').value) || 1.0;
+      let bps = parseFloat(document.getElementById('bps-input').value) || 1.0;
+      if (bps > 30) bps = 30;
+
       const delay = parseFloat(document.getElementById('delay-input').value) || 5.0;
       const tailPct = parseFloat(document.getElementById('tail-input').value) || 1.0;
       const delta = tailPct / 100.0;
@@ -400,15 +418,10 @@
       const x = calculateAnticoneSizeExpectation(bps, delay);
       const dist = calculateGhostdagKWithDistribution(x, delta);
       const k = dist.length - 1;
-      const actualTail = 1.0 - dist.reduce((a, b) => a + b, 0);
+      const actualTail = Math.max(0, 1.0 - dist.reduce((a, b) => a + b, 0));
 
-      // Display Main Results (Clamped to 30 Max)
-      if (k >= 30) {
-        document.getElementById('res-k').innerText = "30+ (Max Limit)";
-      } else {
-        document.getElementById('res-k').innerText = k;
-      }
-
+      // Display Main Results
+      document.getElementById('res-k').innerText = k;
       document.getElementById('res-x').innerText = x.toFixed(4);
       document.getElementById('res-tail').innerText = (actualTail * 100).toFixed(4) + '%';
 
