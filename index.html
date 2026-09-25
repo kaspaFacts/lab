@@ -114,15 +114,15 @@
       <section class="card full-width">
         <h2>Block Time Bounds Analysis for Target $K$</h2>
         <p class="subtitle" style="text-align: left; margin-bottom: 1.5rem;">
-          Calculates the inclusive range of block creation times (in milliseconds) that resolve to a target GHOSTDAG $K$ parameter. Adjust target parameters below to customize the calculation.
+          Calculates the inclusive range of block creation times (in milliseconds) that resolve to a target GHOSTDAG $K$ parameter (constrained to $1 \le K \le 18$).
         </p>
 
         <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;">
           <div class="input-group" style="flex: 1; min-width: 200px;">
-            <label for="target-k-input">Target $K$ Parameter (1 – 100):</label>
+            <label for="target-k-input">Target $K$ Parameter (1 – 18):</label>
             <div class="stepper">
               <button type="button" class="btn-step" onclick="adjustTargetK(-1)">▼</button>
-              <input type="number" id="target-k-input" min="1" max="100" value="10" oninput="updateBoundsSection()" />
+              <input type="number" id="target-k-input" min="1" max="18" value="10" oninput="updateBoundsSection()" />
               <button type="button" class="btn-step" onclick="adjustTargetK(1)">▲</button>
             </div>
           </div>
@@ -177,7 +177,8 @@
       const probabilitiesList = [];
       let n = 0;
 
-      while (true) {
+      // Safety limit of 1000 iterations to prevent browser freeze
+      while (n < 1000) {
         const term = expNegX * poissonTerm;
         cumulativeProbability += term;
         probabilitiesList.push(term);
@@ -189,6 +190,8 @@
         n += 1;
         poissonTerm *= x / n;
       }
+
+      return probabilitiesList;
     }
 
     function calculateGhostdagK(x, maxTailProbability) {
@@ -197,7 +200,8 @@
     }
 
     function blockTimeMsBoundsForK(kTarget, maxNetworkDelay, maxTailProbability) {
-      if (kTarget < 1) return null;
+      // Strictly enforce kTarget range [1, 18]
+      if (kTarget < 1 || kTarget > 18) return null;
 
       function kOfMs(ms) {
         const bps = 1000.0 / ms;
@@ -205,38 +209,33 @@
         return calculateGhostdagK(x, maxTailProbability);
       }
 
-      // Upper bound search: search up to 100 days (~8.64e8 ms)
-      let lo = 1;
-      let hi = 8640000000;
+      // Upper bound limit: 100 days (~8.64e8 ms)
+      const MAX_SEARCH_MS = 8640000000;
 
-      if (kOfMs(1) > kTarget) {
-        return { minMs: 1, maxMs: 1 };
-      }
-
-      // Binary search for maximum MS where k <= kTarget
-      let searchLo = 1, searchHi = hi;
-      while (searchHi - searchLo > 1) {
-        const mid = Math.floor((searchLo + searchHi) / 2);
+      // Binary search for maxMs (largest MS that yields K >= kTarget)
+      let lo = 1, hi = MAX_SEARCH_MS;
+      while (hi - lo > 1) {
+        const mid = Math.floor((lo + hi) / 2);
         if (kOfMs(mid) >= kTarget) {
-          searchLo = mid;
+          lo = mid;
         } else {
-          searchHi = mid;
+          hi = mid;
         }
       }
-      const maxMs = searchLo;
+      const maxMs = lo;
 
-      // Binary search for minimum MS where k == kTarget
-      searchLo = 1;
-      searchHi = maxMs;
-      while (searchHi - searchLo > 1) {
-        const mid = Math.floor((searchLo + searchHi) / 2);
+      // Binary search for minMs (smallest MS that yields K <= kTarget)
+      lo = 1;
+      hi = maxMs;
+      while (hi - lo > 1) {
+        const mid = Math.floor((lo + hi) / 2);
         if (kOfMs(mid) <= kTarget) {
-          searchHi = mid;
+          hi = mid;
         } else {
-          searchLo = mid;
+          lo = mid;
         }
       }
-      const minMs = searchHi;
+      const minMs = hi;
 
       return { minMs, maxMs };
     }
@@ -277,7 +276,7 @@
     function adjustTargetK(delta) {
       const input = document.getElementById('target-k-input');
       let val = parseInt(input.value) || 10;
-      val = Math.max(1, Math.min(100, val + delta));
+      val = Math.max(1, Math.min(18, val + delta)); // Bound between 1 and 18
       input.value = val;
       updateBoundsSection();
     }
@@ -299,7 +298,13 @@
     }
 
     function updateBoundsSection() {
-      const targetK = parseInt(document.getElementById('target-k-input').value) || 1;
+      let targetK = parseInt(document.getElementById('target-k-input').value) || 1;
+      
+      // Enforce hard clamp [1, 18]
+      if (targetK < 1) targetK = 1;
+      if (targetK > 18) targetK = 18;
+      document.getElementById('target-k-input').value = targetK;
+
       const delay = parseFloat(document.getElementById('bounds-delay-input').value) || 5.0;
       const tailPct = parseFloat(document.getElementById('bounds-tail-input').value) || 1.0;
       const delta = tailPct / 100.0;
@@ -311,8 +316,8 @@
         document.getElementById('res-min-ms').innerText = `${formatDuration(bounds.minMs)} (${bounds.minMs.toLocaleString()}ms | ~${maxBps} BPS)`;
         document.getElementById('res-max-ms').innerText = `${formatDuration(bounds.maxMs)} (${bounds.maxMs.toLocaleString()}ms | ~${minBps} BPS)`;
       } else {
-        document.getElementById('res-min-ms').innerText = 'Out of bounds';
-        document.getElementById('res-max-ms').innerText = 'Out of bounds';
+        document.getElementById('res-min-ms').innerText = 'Out of bounds (K must be 1-18)';
+        document.getElementById('res-max-ms').innerText = 'Out of bounds (K must be 1-18)';
       }
     }
 
@@ -391,7 +396,7 @@
       const tailPct = parseFloat(document.getElementById('tail-input').value) || 1.0;
       const delta = tailPct / 100.0;
 
-      // Main Calculations
+      // Main Calculations for Tool 1
       const x = calculateAnticoneSizeExpectation(bps, delay);
       const dist = calculateGhostdagKWithDistribution(x, delta);
       const k = dist.length - 1;
@@ -401,13 +406,6 @@
       document.getElementById('res-k').innerText = k;
       document.getElementById('res-x').innerText = x.toFixed(4);
       document.getElementById('res-tail').innerText = (actualTail * 100).toFixed(4) + '%';
-
-      // Keep target inputs in sync on initial load/change
-      document.getElementById('bounds-delay-input').value = delay.toFixed(1);
-      document.getElementById('bounds-tail-input').value = tailPct.toFixed(1);
-      document.getElementById('target-k-input').value = Math.max(1, k);
-
-      updateBoundsSection();
 
       // Display Probability Distribution Table & Chart Data
       const tbody = document.getElementById('dist-tbody');
@@ -440,7 +438,11 @@
       statusText.innerText = 'Ready';
     }
 
-    window.onload = runCalculations;
+    // Initialize both tools independently on load
+    window.onload = function() {
+      runCalculations();
+      updateBoundsSection();
+    };
   </script>
 </body>
 </html>
